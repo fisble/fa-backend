@@ -31,9 +31,10 @@ router.post('/login', async (req, res) => {
     if (!email || !password) {
       return res.status(400).json({ success: false, message: 'Email and password are required' });
     }
-
+    console.log('Auth login attempt for', email);
     // Try to find a registered user first
     let user = await User.findOne({ email }).select('+password');
+    console.log('Found registered user?', !!user);
     if (user) {
       if (await user.comparePassword(password)) {
         const token = createToken(user);
@@ -46,11 +47,14 @@ router.post('/login', async (req, res) => {
     const Student = require('../models/Student');
     const student = await Student.findOne({ email });
     if (student) {
+      console.log('Found student doc:', student._id ? student._id.toString() : null);
       const localId = (student._id || '').toString();
       const studentIdField = (student.studentId || '').toString();
       const emailLocal = (student.email || '').split('@')[0];
       const envStudentId = (process.env.STUDENT_ID || '').toString();
       const envStudentPassword = (process.env.STUDENT_PASSWORD || '').toString();
+      console.log('envStudentId, envStudentPassword:', envStudentId, envStudentPassword);
+      console.log('password match candidates:', localId, studentIdField, emailLocal);
       if (password === localId || password === studentIdField || password === emailLocal || password === envStudentId || password === envStudentPassword) {
         // create a User record for this student if none exists
         if (!user) {
