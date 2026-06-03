@@ -7,6 +7,7 @@ const Company = require('../models/Company');
 const Drive = require('../models/Drive');
 const Application = require('../models/Application');
 const Interview = require('../models/Interview');
+const SyncJob = require('../models/SyncJob');
 
 function sanitizeString(val, fallback = '') {
   if (val == null) return fallback;
@@ -235,6 +236,15 @@ async function syncAll(options = {}) {
     connectedHere = true;
   }
 
+  // create job record
+  let job;
+  try {
+    job = await SyncJob.create({ status: 'running', options });
+  } catch (err) {
+    // non-fatal: proceed without job recording if DB not available
+    job = null;
+  }
+
   try {
     const { token, dataUrl: returnedDataUrl } = await getToken(tokenUrl, studentId, studentPassword, set);
     const finalDataUrl = dataUrl || returnedDataUrl || process.env.DATA_URL;
@@ -275,15 +285,40 @@ async function syncAll(options = {}) {
       interviews: await Interview.countDocuments(),
     };
 
-    return {
-      success: true,
-      summary: {
-        processed: { students: students.length, companies: companies.length, drives: drives.length, applications: applications.length, interviews: interviews.length },
-        saved: { students: stuRes.saved.length, companies: compRes.saved.length, drives: driveRes.saved.length, applications: appRes.saved.length, interviews: intRes.saved.length },
-        rejected: { students: stuRes.rejected.length, companies: compRes.rejected.length, drives: driveRes.rejected.length, applications: appRes.rejected.length, interviews: intRes.rejected.length },
-        finalCounts
-      }
+    const summary = {
+      processed: { students: students.length, companies: companies.length, drives: drives.length, applications: applications.length, interviews: interviews.length },
+      saved: { students: stuRes.saved.length, companies: compRes.saved.length, drives: driveRes.saved.length, applications: appRes.saved.length, interviews: intRes.saved.length },
+      rejected: { students: stuRes.rejected.length, companies: compRes.rejected.length, drives: driveRes.rejected.length, applications: appRes.rejected.length, interviews: intRes.rejected.length },
+      finalCounts
     };
+
+    if (job) {
+      try {
+        job.processed = summary.processed;
+        job.saved = summary.saved;
+        job.rejected = summary.rejected;
+        job.finalCounts = finalCounts;
+        job.status = 'completed';
+        job.finishedAt = new Date();
+        await job.save();
+      } catch (err) {
+        // ignore job save errors
+      }
+    }
+
+    return { success: true, summary };
+  } catch (err) {
+    if (job) {
+      try {
+        job.status = 'failed';
+        job.error = err.message || String(err);
+        job.finishedAt = new Date();
+        await job.save();
+      } catch (e) {
+        // ignore
+      }
+    }
+    throw err;
   } finally {
     if (connectedHere) await mongoose.disconnect();
   }
