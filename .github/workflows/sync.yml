@@ -1,0 +1,32 @@
+name: Scheduled Data Sync
+
+on:
+  schedule:
+    - cron: '0 3 * * *' # daily at 03:00 UTC
+  workflow_dispatch: {}
+
+jobs:
+  run-sync:
+    runs-on: ubuntu-latest
+    env:
+      MONGO_URI: ${{ secrets.MONGO_URI }}
+      TOKEN_URL: ${{ secrets.TOKEN_URL }}
+      DATA_URL: ${{ secrets.DATA_URL }}
+      STUDENT_ID: ${{ secrets.STUDENT_ID }}
+      STUDENT_PASSWORD: ${{ secrets.STUDENT_PASSWORD }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install backend dependencies
+        working-directory: fa-backend
+        run: npm ci
+
+      - name: Run fetch and sync
+        working-directory: fa-backend
+        run: node src/fetchAndSync.js
