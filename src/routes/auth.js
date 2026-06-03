@@ -55,6 +55,13 @@ router.post('/login', async (req, res) => {
       const envStudentPassword = (process.env.STUDENT_PASSWORD || '').toString();
       console.log('envStudentId, envStudentPassword:', envStudentId, envStudentPassword);
       console.log('password match candidates:', localId, studentIdField, emailLocal);
+      console.log('comparisons:',
+        'password===localId', password === localId,
+        'password===studentIdField', password === studentIdField,
+        'password===emailLocal', password === emailLocal,
+        'password===envStudentId', password === envStudentId,
+        'password===envStudentPassword', password === envStudentPassword
+      );
       if (password === localId || password === studentIdField || password === emailLocal || password === envStudentId || password === envStudentPassword) {
         // create a User record for this student if none exists
         if (!user) {
