@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: fa-backend
+    env: node
+    plan: free
+    repo: https://github.com/fisble/fa-backend
+    branch: main
+    buildCommand: npm ci
+    startCommand: npm start
+    envVars:
+      - key: MONGO_URI
+        fromDatabase: false
+        value: ''
+      - key: TOKEN_URL
+        fromDatabase: false
+        value: ''
+      - key: DATA_URL
+        fromDatabase: false
+        value: ''
+      - key: STUDENT_ID
+        fromDatabase: false
+        value: ''
+      - key: STUDENT_PASSWORD
+        fromDatabase: false
+        value: ''
