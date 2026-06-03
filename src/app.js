@@ -5,8 +5,10 @@ const studentRoutes = require('./routes/students');
 const companyRoutes = require('./routes/companies');
 const driveRoutes = require('./routes/drives');
 const applicationRoutes = require('./routes/applications');
+const interviewRoutes = require('./routes/interviews');
 const syncRoutes = require('./routes/sync');
 const statsRoutes = require('./routes/stats');
+const analyticsRoutes = require('./routes/analytics');
 const tasksRoutes = require('./routes/tasks');
 
 const app = express();
@@ -25,6 +27,8 @@ app.use('/api/drives', driveRoutes);
 app.use('/api/applications', applicationRoutes);
 app.use('/api/sync', syncRoutes);
 app.use('/api/stats', statsRoutes);
+app.use('/api/analytics', analyticsRoutes);
+app.use('/api/interviews', interviewRoutes);
 app.use('/api/tasks', tasksRoutes);
 
 app.use((req, res) => {

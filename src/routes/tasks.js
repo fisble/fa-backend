@@ -30,6 +30,21 @@ router.get('/', auth, async (req, res) => {
   }
 });
 
+router.get('/search', auth, async (req, res) => {
+  try {
+    const { q, priority, completed, page = 1, limit = 10 } = req.query;
+    const query = {};
+    if (q) query.$or = [ { title: new RegExp(q,'i') }, { description: new RegExp(q,'i') } ];
+    if (priority) query.priority = priority;
+    if (typeof completed !== 'undefined') query.completed = (String(completed) === 'true');
+    const items = await Task.find(query).skip((page-1)*limit).limit(Number(limit));
+    const total = await Task.countDocuments(query);
+    res.json({ success: true, data: items, meta: { total, page: Number(page), limit: Number(limit) } });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 // GET /api/tasks/:id
 router.get('/:id', auth, async (req, res) => {
   try {
