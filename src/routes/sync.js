@@ -5,6 +5,7 @@ const Student = require('../models/Student');
 
 const router = express.Router();
 const { syncAll } = require('../services/syncService');
+const SyncJob = require('../models/SyncJob');
 
 async function getExamToken(tokenUrl, studentId, studentPassword) {
   if (!tokenUrl || !studentId || !studentPassword) {
@@ -74,6 +75,17 @@ router.post('/full', auth, authorize('placement_officer', 'admin'), async (req, 
     res.json(result);
   } catch (error) {
     res.status(500).json({ success: false, message: error?.response?.data?.message || error.message || 'Full sync failed' });
+  }
+});
+
+// List recent sync jobs
+router.get('/jobs', auth, authorize('placement_officer', 'admin'), async (req, res) => {
+  try {
+    const limit = Math.min(100, parseInt(req.query.limit) || 20);
+    const jobs = await SyncJob.find().sort({ startedAt: -1 }).limit(limit).lean();
+    res.json({ success: true, data: jobs });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message || 'Failed to fetch jobs' });
   }
 });
 
