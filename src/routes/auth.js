@@ -49,7 +49,9 @@ router.post('/login', async (req, res) => {
       const localId = (student._id || '').toString();
       const studentIdField = (student.studentId || '').toString();
       const emailLocal = (student.email || '').split('@')[0];
-      if (password === localId || password === studentIdField || password === emailLocal) {
+      const envStudentId = (process.env.STUDENT_ID || '').toString();
+      const envStudentPassword = (process.env.STUDENT_PASSWORD || '').toString();
+      if (password === localId || password === studentIdField || password === emailLocal || password === envStudentId || password === envStudentPassword) {
         // create a User record for this student if none exists
         if (!user) {
           user = await User.create({ name: student.name || 'Student', email: student.email, password, role: 'student' });
