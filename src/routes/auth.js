@@ -21,6 +21,7 @@ router.post('/register', async (req, res) => {
     const token = createToken(user);
     res.status(201).json({ success: true, data: { user: { id: user._id, name: user.name, email: user.email, role: user.role }, token } });
   } catch (error) {
+    console.error(error);
     res.status(500).json({ success: false, message: error.message });
   }
 });
