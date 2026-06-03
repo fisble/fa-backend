@@ -4,6 +4,7 @@ const { auth, authorize } = require('../middleware/auth');
 const Student = require('../models/Student');
 
 const router = express.Router();
+const { syncAll } = require('../services/syncService');
 
 async function getExamToken(tokenUrl, studentId, studentPassword) {
   if (!tokenUrl || !studentId || !studentPassword) {
@@ -58,6 +59,21 @@ router.post('/dataset', auth, authorize('placement_officer', 'admin'), async (re
     res.json({ success: true, data: saved, message: `Synchronized ${saved.length} students` });
   } catch (error) {
     res.status(500).json({ success: false, message: error?.response?.data?.message || error.message || 'Sync failed' });
+  }
+});
+
+// Full dataset sync (students, companies, drives, applications, interviews)
+router.post('/full', auth, authorize('placement_officer', 'admin'), async (req, res) => {
+  try {
+    const tokenUrl = req.body.tokenUrl || process.env.TOKEN_URL;
+    const studentId = req.body.studentId || process.env.STUDENT_ID;
+    const studentPassword = req.body.studentPassword || process.env.STUDENT_PASSWORD;
+    const dataUrl = req.body.dataUrl || process.env.DATA_URL;
+
+    const result = await syncAll({ tokenUrl, studentId, studentPassword, dataUrl, manageConnection: false });
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ success: false, message: error?.response?.data?.message || error.message || 'Full sync failed' });
   }
 });
 

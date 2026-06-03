@@ -1,34 +1,12 @@
-/**
- * Standalone script to fetch data from the T4E test server API
- * and store it into MongoDB Atlas.
- *
- * Responsibilities (per Q4 – Sync API):
- *  1. Fetch dataset from private API
- *  2. Validate records
- *  3. Normalize values
- *  4. Reject invalid entries
- *  5. Prevent duplicate insertion
- *  6. Persist valid records into MongoDB
- *  7. Return sync summary
- *
- * Usage: node src/fetchAndSync.js
- */
 const axios = require('axios');
 const mongoose = require('mongoose');
 require('dotenv').config();
 
-const Student = require('./models/Student');
-const Company = require('./models/Company');
-const Drive = require('./models/Drive');
-const Application = require('./models/Application');
-const Interview = require('./models/Interview');
-
-const TOKEN_URL = process.env.TOKEN_URL || 'https://t4e-testserver.onrender.com/api/public/token';
-const STUDENT_ID = process.env.STUDENT_ID || 'E0423002';
-const STUDENT_PASSWORD = process.env.STUDENT_PASSWORD || '197349';
-const MONGO_URI = process.env.MONGO_URI;
-
-// ─── Helpers ───────────────────────────────────────────────────────
+const Student = require('../models/Student');
+const Company = require('../models/Company');
+const Drive = require('../models/Drive');
+const Application = require('../models/Application');
+const Interview = require('../models/Interview');
 
 function sanitizeString(val, fallback = '') {
   if (val == null) return fallback;
@@ -62,52 +40,28 @@ function sanitizePhone(val) {
 }
 
 function isValidPhone(phone) {
-  // Must be at least 10 digits
   const digits = phone.replace(/\D/g, '');
   return digits.length >= 10;
 }
 
-// ─── Step 1: Get Token ─────────────────────────────────────────────
-
-async function getToken() {
-  console.log('🔑  Requesting token...');
-  const res = await axios.post(TOKEN_URL, {
-    studentId: STUDENT_ID,
-    password: STUDENT_PASSWORD,
-    set: 'setA'
-  }, {
-    headers: { 'Content-Type': 'application/json' }
-  });
-  const token = res.data?.token;
-  const dataUrl = res.data?.dataUrl;
-  if (!token) throw new Error('Could not extract token from response');
-  console.log('   ✅ Token obtained');
-  console.log('   📍 Data URL:', dataUrl);
-  return { token, dataUrl };
+async function getToken(tokenUrl, studentId, studentPassword, set) {
+  const body = { studentId, password: studentPassword };
+  if (set) body.set = set;
+  const res = await axios.post(tokenUrl, body, { headers: { 'Content-Type': 'application/json' } });
+  return { token: res.data?.token, dataUrl: res.data?.dataUrl, raw: res.data };
 }
 
-// ─── Step 2: Fetch Data ────────────────────────────────────────────
-
 async function fetchData(token, dataUrl) {
-  const fullUrl = `https://t4e-testserver.onrender.com/api${dataUrl}`;
-  console.log('📦  Fetching data from:', fullUrl);
-  const res = await axios.get(fullUrl, {
-    headers: { Authorization: `Bearer ${token}` }
-  });
-  console.log('   ✅ Data received');
+  const fullUrl = dataUrl.startsWith('http') ? dataUrl : `https://t4e-testserver.onrender.com/api${dataUrl}`;
+  const res = await axios.get(fullUrl, { headers: { Authorization: `Bearer ${token}` } });
   return res.data;
 }
 
-// ─── Step 3: Process Students ──────────────────────────────────────
-
 async function processStudents(records) {
-  console.log('\n👨‍🎓  Processing students... (total:', records.length, ')');
   const saved = [];
   const rejected = [];
   const duplicates = [];
-
   for (const item of records) {
-    // Sanitize
     const payload = {
       studentId: sanitizeString(item.studentId),
       name: sanitizeString(item.name),
@@ -120,7 +74,6 @@ async function processStudents(records) {
       status: sanitizeString(item.status, 'active'),
     };
 
-    // Validate
     const errors = [];
     if (!payload.studentId) errors.push('missing studentId');
     if (!payload.name) errors.push('missing name');
@@ -141,28 +94,16 @@ async function processStudents(records) {
       );
       saved.push(student);
     } catch (err) {
-      if (err.code === 11000) {
-        duplicates.push(payload.studentId);
-      } else {
-        rejected.push({ studentId: item.studentId, reasons: [err.message] });
-      }
+      if (err.code === 11000) duplicates.push(payload.studentId);
+      else rejected.push({ studentId: item.studentId, reasons: [err.message] });
     }
   }
-
-  console.log(`   ✅ Saved: ${saved.length}  ❌ Rejected: ${rejected.length}  🔁 Duplicates: ${duplicates.length}`);
-  if (rejected.length > 0) {
-    rejected.forEach(r => console.log(`      ↳ ${r.studentId}: ${r.reasons.join(', ')}`));
-  }
-  return { saved, rejected };
+  return { saved, rejected, duplicates };
 }
 
-// ─── Step 4: Process Companies ─────────────────────────────────────
-
 async function processCompanies(records) {
-  console.log('\n🏢  Processing companies... (total:', records.length, ')');
   const saved = [];
   const rejected = [];
-
   for (const item of records) {
     const payload = {
       companyId: sanitizeString(item.companyId),
@@ -174,10 +115,7 @@ async function processCompanies(records) {
       driveDate: sanitizeString(item.driveDate),
       status: sanitizeString(item.status, 'upcoming'),
     };
-
-    if (!payload.companyId) { rejected.push({ id: item.companyId, reason: 'missing companyId' }); continue; }
-    if (!payload.name) { rejected.push({ id: item.companyId, reason: 'missing name' }); continue; }
-
+    if (!payload.companyId || !payload.name) { rejected.push({ id: item.companyId, reason: 'missing fields' }); continue; }
     try {
       const company = await Company.findOneAndUpdate(
         { companyId: payload.companyId },
@@ -189,18 +127,12 @@ async function processCompanies(records) {
       rejected.push({ id: item.companyId, reason: err.message });
     }
   }
-
-  console.log(`   ✅ Saved: ${saved.length}  ❌ Rejected: ${rejected.length}`);
   return { saved, rejected };
 }
 
-// ─── Step 5: Process Drives ────────────────────────────────────────
-
 async function processDrives(records, companyObjMap) {
-  console.log('\n🚗  Processing drives... (total:', records.length, ')');
   const saved = [];
   const rejected = [];
-
   for (const item of records) {
     const payload = {
       driveId: sanitizeString(item.driveId),
@@ -212,15 +144,8 @@ async function processDrives(records, companyObjMap) {
       rounds: Array.isArray(item.rounds) ? item.rounds : [],
       status: sanitizeString(item.status, 'open'),
     };
-
-    // Link to Company ObjectId
-    if (payload.companyId && companyObjMap[payload.companyId]) {
-      payload.company = companyObjMap[payload.companyId];
-    }
-
-    if (!payload.driveId) { rejected.push({ id: item.driveId, reason: 'missing driveId' }); continue; }
-    if (!payload.title) { rejected.push({ id: item.driveId, reason: 'missing title' }); continue; }
-
+    if (payload.companyId && companyObjMap[payload.companyId]) payload.company = companyObjMap[payload.companyId];
+    if (!payload.driveId || !payload.title) { rejected.push({ id: item.driveId, reason: 'missing fields' }); continue; }
     try {
       const drive = await Drive.findOneAndUpdate(
         { driveId: payload.driveId },
@@ -232,18 +157,12 @@ async function processDrives(records, companyObjMap) {
       rejected.push({ id: item.driveId, reason: err.message });
     }
   }
-
-  console.log(`   ✅ Saved: ${saved.length}  ❌ Rejected: ${rejected.length}`);
   return { saved, rejected };
 }
 
-// ─── Step 6: Process Applications ──────────────────────────────────
-
 async function processApplications(records, studentObjMap, driveObjMap) {
-  console.log('\n📝  Processing applications... (total:', records.length, ')');
   const saved = [];
   const rejected = [];
-
   for (const item of records) {
     const payload = {
       applicationId: sanitizeString(item.applicationId),
@@ -253,17 +172,9 @@ async function processApplications(records, studentObjMap, driveObjMap) {
       status: sanitizeString(item.status, 'pending'),
       appliedAt: item.appliedAt ? new Date(item.appliedAt) : new Date(),
     };
-
-    // Link ObjectIds
-    if (payload.studentId && studentObjMap[payload.studentId]) {
-      payload.student = studentObjMap[payload.studentId];
-    }
-    if (payload.driveId && driveObjMap[payload.driveId]) {
-      payload.drive = driveObjMap[payload.driveId];
-    }
-
+    if (payload.studentId && studentObjMap[payload.studentId]) payload.student = studentObjMap[payload.studentId];
+    if (payload.driveId && driveObjMap[payload.driveId]) payload.drive = driveObjMap[payload.driveId];
     if (!payload.applicationId) { rejected.push({ id: item.applicationId, reason: 'missing applicationId' }); continue; }
-
     try {
       const app = await Application.findOneAndUpdate(
         { applicationId: payload.applicationId },
@@ -275,18 +186,12 @@ async function processApplications(records, studentObjMap, driveObjMap) {
       rejected.push({ id: item.applicationId, reason: err.message });
     }
   }
-
-  console.log(`   ✅ Saved: ${saved.length}  ❌ Rejected: ${rejected.length}`);
   return { saved, rejected };
 }
 
-// ─── Step 7: Process Interviews ────────────────────────────────────
-
 async function processInterviews(records, appObjMap) {
-  console.log('\n🎤  Processing interviews... (total:', records.length, ')');
   const saved = [];
   const rejected = [];
-
   for (const item of records) {
     const payload = {
       interviewId: sanitizeString(item.interviewId),
@@ -296,14 +201,8 @@ async function processInterviews(records, appObjMap) {
       scheduledAt: item.interviewDate ? new Date(item.interviewDate) : new Date(),
       result: sanitizeString(item.result),
     };
-
-    // Link ObjectId
-    if (payload.applicationId && appObjMap[payload.applicationId]) {
-      payload.application = appObjMap[payload.applicationId];
-    }
-
+    if (payload.applicationId && appObjMap[payload.applicationId]) payload.application = appObjMap[payload.applicationId];
     if (!payload.interviewId) { rejected.push({ id: item.interviewId, reason: 'missing interviewId' }); continue; }
-
     try {
       const interview = await Interview.findOneAndUpdate(
         { interviewId: payload.interviewId },
@@ -315,27 +214,79 @@ async function processInterviews(records, appObjMap) {
       rejected.push({ id: item.interviewId, reason: err.message });
     }
   }
-
-  console.log(`   ✅ Saved: ${saved.length}  ❌ Rejected: ${rejected.length}`);
   return { saved, rejected };
 }
 
-// ─── Main ──────────────────────────────────────────────────────────
+async function syncAll(options = {}) {
+  const {
+    tokenUrl = process.env.TOKEN_URL || 'https://t4e-testserver.onrender.com/api/public/token',
+    studentId = process.env.STUDENT_ID || 'E0423002',
+    studentPassword = process.env.STUDENT_PASSWORD || '197349',
+    set = 'setA',
+    dataUrl = process.env.DATA_URL,
+    manageConnection = true,
+    mongoUri = process.env.MONGO_URI,
+  } = options;
 
-const { syncAll } = require('./services/syncService');
+  let connectedHere = false;
+  if (manageConnection) {
+    if (!mongoUri) throw new Error('MONGO_URI is required when manageConnection is true');
+    await mongoose.connect(mongoUri);
+    connectedHere = true;
+  }
 
-async function main() {
   try {
-    console.log('Starting standalone sync...');
-    const result = await syncAll({ manageConnection: true });
-    if (result && result.success) {
-      console.log('Sync completed:', result.summary);
-    } else {
-      console.error('Sync failed', result);
-    }
-  } catch (err) {
-    console.error('Error running sync:', err.message || err);
+    const { token, dataUrl: returnedDataUrl } = await getToken(tokenUrl, studentId, studentPassword, set);
+    const finalDataUrl = dataUrl || returnedDataUrl || process.env.DATA_URL;
+    if (!token) throw new Error('Failed to obtain token');
+    const raw = await fetchData(token, finalDataUrl);
+    const data = raw.data || raw;
+
+    const students = data.students || [];
+    const companies = data.companies || [];
+    const drives = data.drives || [];
+    const applications = data.applications || [];
+    const interviews = data.interviews || [];
+
+    const studentObjMap = {};
+    const companyObjMap = {};
+    const driveObjMap = {};
+    const appObjMap = {};
+
+    const compRes = await processCompanies(companies);
+    compRes.saved.forEach(c => { companyObjMap[c.companyId] = c._id; });
+
+    const stuRes = await processStudents(students);
+    stuRes.saved.forEach(s => { studentObjMap[s.studentId] = s._id; });
+
+    const driveRes = await processDrives(drives, companyObjMap);
+    driveRes.saved.forEach(d => { driveObjMap[d.driveId] = d._id; });
+
+    const appRes = await processApplications(applications, studentObjMap, driveObjMap);
+    appRes.saved.forEach(a => { appObjMap[a.applicationId] = a._id; });
+
+    const intRes = await processInterviews(interviews, appObjMap);
+
+    const finalCounts = {
+      students: await Student.countDocuments(),
+      companies: await Company.countDocuments(),
+      drives: await Drive.countDocuments(),
+      applications: await Application.countDocuments(),
+      interviews: await Interview.countDocuments(),
+    };
+
+    return {
+      success: true,
+      summary: {
+        processed: { students: students.length, companies: companies.length, drives: drives.length, applications: applications.length, interviews: interviews.length },
+        saved: { students: stuRes.saved.length, companies: compRes.saved.length, drives: driveRes.saved.length, applications: appRes.saved.length, interviews: intRes.saved.length },
+        rejected: { students: stuRes.rejected.length, companies: compRes.rejected.length, drives: driveRes.rejected.length, applications: appRes.rejected.length, interviews: intRes.rejected.length },
+        finalCounts
+      }
+    };
+  } finally {
+    if (connectedHere) await mongoose.disconnect();
   }
 }
 
-if (require.main === module) main();
+module.exports = { syncAll };
