@@ -35,4 +35,10 @@ app.use((req, res) => {
     res.status(404).json({ success: false, message: 'Route not found' });
 });
 
+// Global error handler to surface stack traces during local debugging
+app.use((err, req, res, next) => {
+    console.error('Unhandled error:', err && err.stack ? err.stack : err);
+    res.status(500).json({ success: false, message: err?.message || 'Internal server error' });
+});
+
 module.exports = app;
