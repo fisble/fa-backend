@@ -13,6 +13,11 @@ const tasksRoutes = require('./routes/tasks');
 
 const app = express();
 app.use(cors());
+// simple request logger for debugging
+app.use((req, res, next) => {
+    console.log('REQ', req.method, req.originalUrl);
+    next();
+});
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
