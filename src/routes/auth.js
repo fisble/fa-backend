@@ -31,12 +31,39 @@ router.post('/login', async (req, res) => {
     if (!email || !password) {
       return res.status(400).json({ success: false, message: 'Email and password are required' });
     }
-    const user = await User.findOne({ email }).select('+password');
-    if (!user || !(await user.comparePassword(password))) {
-      return res.status(401).json({ success: false, message: 'Invalid credentials' });
+
+    // Try to find a registered user first
+    let user = await User.findOne({ email }).select('+password');
+    if (user) {
+      if (await user.comparePassword(password)) {
+        const token = createToken(user);
+        return res.json({ success: true, data: { user: { id: user._id, name: user.name, email: user.email, role: user.role }, token } });
+      }
+      // password mismatch for existing user; fallthrough to student fallback
     }
-    const token = createToken(user);
-    res.json({ success: true, data: { user: { id: user._id, name: user.name, email: user.email, role: user.role }, token } });
+
+    // Student fallback: accept students from `students` collection where password equals student id or student.studentId or email local-part
+    const Student = require('../models/Student');
+    const student = await Student.findOne({ email });
+    if (student) {
+      const localId = (student._id || '').toString();
+      const studentIdField = (student.studentId || '').toString();
+      const emailLocal = (student.email || '').split('@')[0];
+      if (password === localId || password === studentIdField || password === emailLocal) {
+        // create a User record for this student if none exists
+        if (!user) {
+          user = await User.create({ name: student.name || 'Student', email: student.email, password, role: 'student' });
+        } else {
+          // update existing user's password to match provided (so future logins work)
+          user.password = password;
+          await user.save();
+        }
+        const token = createToken(user);
+        return res.json({ success: true, data: { user: { id: user._id, name: user.name, email: user.email, role: user.role }, token } });
+      }
+    }
+
+    return res.status(401).json({ success: false, message: 'Invalid credentials' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
